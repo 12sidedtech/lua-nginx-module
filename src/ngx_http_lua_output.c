@@ -40,14 +40,9 @@ ngx_http_lua_ngx_write(lua_State *L)
 {
     ngx_http_request_t          *r;
     ngx_http_lua_ctx_t          *ctx;
-    const char                  *p;
-    size_t                       len;
-    size_t                       size;
     ngx_buf_t                   *b;
     ngx_chain_t                 *cl;
     ngx_int_t                    rc;
-    int                          i;
-    int                          nargs;
     int                          type;
     const char                  *msg;
     void                        *buffer;
@@ -86,17 +81,14 @@ ngx_http_lua_ngx_write(lua_State *L)
         return 2;
     }
 
-    nargs = lua_gettop(L);
-    size = 0;
-
     type = lua_type(L, 1);
 
-    if (LUA_TLIGHTUSERDATA != type) {
+    if (LUA_TLIGHTUSERDATA != type)
     {
         msg = lua_pushfstring(L, "void* and number expected"
                               "but got %s", lua_typename(L, type));
 
-        return luaL_argerror(L, i, msg);
+        return luaL_argerror(L, 1, msg);
     }
 
     buffer = lua_touserdata(L, 1);
@@ -107,12 +99,12 @@ ngx_http_lua_ngx_write(lua_State *L)
         msg = lua_pushfstring(L, "void* and number expected"
                               "but got %s", lua_typename(L, type));
 
-        return luaL_argerror(L, i, msg);
+        return luaL_argerror(L, 2, msg);
     }
     buf_sz = (size_t) lua_tonumber(L, 2);
 
     cl = ngx_http_lua_chain_get_free_buf(r->connection->log, r->pool,
-                                         &ctx->free_bufs, size);
+                                         &ctx->free_bufs, buf_sz);
 
     if (cl == NULL) {
         return luaL_error(L, "no memory");
@@ -899,3 +891,4 @@ ngx_http_lua_flush_cleanup(void *data)
 }
 
 /* vi:set ft=c ts=4 sw=4 et fdm=marker: */
+
