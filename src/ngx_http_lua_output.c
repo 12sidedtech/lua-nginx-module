@@ -9,6 +9,7 @@
 #include <math.h>
 
 
+static int ngx_http_lua_ngx_write(lua_State *L);
 static int ngx_http_lua_ngx_say(lua_State *L);
 static int ngx_http_lua_ngx_print(lua_State *L);
 static int ngx_http_lua_ngx_flush(lua_State *L);
@@ -33,6 +34,110 @@ ngx_http_lua_ngx_say(lua_State *L)
     return ngx_http_lua_ngx_echo(L, 1);
 }
 
+
+static int
+ngx_http_lua_ngx_write(lua_State *L)
+{
+    ngx_http_request_t          *r;
+    ngx_http_lua_ctx_t          *ctx;
+    const char                  *p;
+    size_t                       len;
+    size_t                       size;
+    ngx_buf_t                   *b;
+    ngx_chain_t                 *cl;
+    ngx_int_t                    rc;
+    int                          i;
+    int                          nargs;
+    int                          type;
+    const char                  *msg;
+    void                        *buffer;
+    size_t                       buf_sz;
+
+    r = ngx_http_lua_get_req(L);
+    if (r == NULL) {
+        return luaL_error(L, "no request object found");
+    }
+
+    ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
+
+    if (ctx == NULL) {
+        return luaL_error(L, "no request ctx found");
+    }
+
+    ngx_http_lua_check_context(L, ctx, NGX_HTTP_LUA_CONTEXT_REWRITE
+                               | NGX_HTTP_LUA_CONTEXT_ACCESS
+                               | NGX_HTTP_LUA_CONTEXT_CONTENT);
+
+    if (ctx->acquired_raw_req_socket) {
+        lua_pushnil(L);
+        lua_pushliteral(L, "raw request socket acquired");
+        return 2;
+    }
+
+    if (r->header_only) {
+        lua_pushnil(L);
+        lua_pushliteral(L, "header only");
+        return 2;
+    }
+
+    if (ctx->eof) {
+        lua_pushnil(L);
+        lua_pushliteral(L, "seen eof");
+        return 2;
+    }
+
+    nargs = lua_gettop(L);
+    size = 0;
+
+    type = lua_type(L, 1);
+
+    if (LUA_TLIGHTUSERDATA != type) {
+    {
+        msg = lua_pushfstring(L, "void* and number expected"
+                              "but got %s", lua_typename(L, type));
+
+        return luaL_argerror(L, i, msg);
+    }
+
+    buffer = lua_touserdata(L, 1);
+
+    type = lua_type(L, 2);
+
+    if (LUA_TNUMBER != type) {
+        msg = lua_pushfstring(L, "void* and number expected"
+                              "but got %s", lua_typename(L, type));
+
+        return luaL_argerror(L, i, msg);
+    }
+    buf_sz = (size_t) lua_tonumber(L, 2);
+
+    cl = ngx_http_lua_chain_get_free_buf(r->connection->log, r->pool,
+                                         &ctx->free_bufs, size);
+
+    if (cl == NULL) {
+        return luaL_error(L, "no memory");
+    }
+
+    b = cl->buf;
+    b->last = ngx_copy(b->last, (u_char *) buffer, buf_sz);
+
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "lua write response");
+
+    rc = ngx_http_lua_send_chain_link(r, ctx, cl);
+
+    if (rc == NGX_ERROR || rc >= NGX_HTTP_SPECIAL_RESPONSE) {
+        lua_pushnil(L);
+        lua_pushliteral(L, "nginx output filter error");
+        return 2;
+    }
+
+    dd("downstream write: %d, buf len: %d", (int) rc,
+       (int) (b->last - b->pos));
+
+    lua_pushinteger(L, 1);
+    return 1;
+}
 
 static int
 ngx_http_lua_ngx_echo(lua_State *L, unsigned newline)
@@ -235,7 +340,6 @@ ngx_http_lua_ngx_echo(lua_State *L, unsigned newline)
     lua_pushinteger(L, 1);
     return 1;
 }
-
 
 size_t
 ngx_http_lua_calc_strlen_in_table(lua_State *L, int index, int arg_i,
@@ -651,6 +755,9 @@ ngx_http_lua_inject_output_api(lua_State *L)
 {
     lua_pushcfunction(L, ngx_http_lua_ngx_send_headers);
     lua_setfield(L, -2, "send_headers");
+
+    lua_pushcfunction(L, ngx_http_lua_ngx_write);
+    lua_setfield(L, -2, "write");
 
     lua_pushcfunction(L, ngx_http_lua_ngx_print);
     lua_setfield(L, -2, "print");
