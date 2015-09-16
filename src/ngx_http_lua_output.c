@@ -18,6 +18,10 @@ static int ngx_http_lua_ngx_send_headers(lua_State *L);
 static int ngx_http_lua_ngx_echo(lua_State *L, unsigned newline);
 static void ngx_http_lua_flush_cleanup(void *data);
 
+union horrible_hack {
+    double dbl;
+    void* ptr;
+};
 
 static int
 ngx_http_lua_ngx_print(lua_State *L)
@@ -83,25 +87,34 @@ ngx_http_lua_ngx_write(lua_State *L)
 
     type = lua_type(L, 1);
 
-    if (LUA_TLIGHTUSERDATA != type)
-    {
-        msg = lua_pushfstring(L, "void* and number expected"
+    if (LUA_TLIGHTUSERDATA == type) {
+        buffer = lua_touserdata(L, 1);
+    }
+    else if (LUA_TNUMBER == type) {
+        union horrible_hack hack;
+        hack.dbl = lua_tonumber(L, 1);
+        buffer = hack.ptr;
+    }
+    else {
+        msg = lua_pushfstring(L, "void*|number and number expected"
                               "but got %s", lua_typename(L, type));
-
         return luaL_argerror(L, 1, msg);
     }
 
-    buffer = lua_touserdata(L, 1);
+    //fprintf(stderr, "Got an address of %lx for buffer\n", buffer);
 
     type = lua_type(L, 2);
 
     if (LUA_TNUMBER != type) {
-        msg = lua_pushfstring(L, "void* and number expected"
+        msg = lua_pushfstring(L, "void*|number and number expected"
                               "but got %s", lua_typename(L, type));
 
         return luaL_argerror(L, 2, msg);
     }
+
     buf_sz = (size_t) lua_tonumber(L, 2);
+
+    //fprintf(stderr, "Got a buf size of %lu for buffer\n", buf_sz);
 
     cl = ngx_http_lua_chain_get_free_buf(r->connection->log, r->pool,
                                          &ctx->free_bufs, buf_sz);
